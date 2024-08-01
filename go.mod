@@ -1,6 +1,6 @@
-module github.com/kumparan/cacher/v2
+module github.com/nuzirwan/cacher/v2
 
-go 1.20
+go 1.22.0
 
 require (
 	github.com/alicebob/miniredis v2.5.0+incompatible
