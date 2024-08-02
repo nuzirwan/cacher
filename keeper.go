@@ -33,46 +33,14 @@ type HashMember struct {
 }
 
 type (
-	// RedisConnector :Cluster or Client:
-	RedisConnector interface {
-		TxPipeline() goredis.Pipeliner
-		Pipeline() goredis.Pipeliner
-
-		Get(ctx context.Context, key string) *goredis.StringCmd
-		Set(ctx context.Context, key string, value interface{}, expiration time.Duration) *goredis.StatusCmd
-		Incr(ctx context.Context, key string) *goredis.IntCmd
-		SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) *goredis.BoolCmd
-		Eval(ctx context.Context, script string, keys []string, args ...interface{}) *goredis.Cmd
-		EvalSha(ctx context.Context, sha1 string, keys []string, args ...interface{}) *goredis.Cmd
-		EvalRO(ctx context.Context, script string, keys []string, args ...interface{}) *goredis.Cmd
-		EvalShaRO(ctx context.Context, sha1 string, keys []string, args ...interface{}) *goredis.Cmd
-		ScriptExists(ctx context.Context, hashes ...string) *goredis.BoolSliceCmd
-		ScriptLoad(ctx context.Context, script string) *goredis.StringCmd
-		Del(ctx context.Context, keys ...string) *goredis.IntCmd
-		HDel(ctx context.Context, key string, fields ...string) *goredis.IntCmd
-		HGet(ctx context.Context, key, field string) *goredis.StringCmd
-		HSet(ctx context.Context, key string, values ...interface{}) *goredis.IntCmd
-		TTL(ctx context.Context, key string) *goredis.DurationCmd
-		RPush(ctx context.Context, key string, values ...interface{}) *goredis.IntCmd
-		RPop(ctx context.Context, key string) *goredis.StringCmd
-		LLen(ctx context.Context, key string) *goredis.IntCmd
-		LPop(ctx context.Context, key string) *goredis.StringCmd
-		LPush(ctx context.Context, key string, values ...interface{}) *goredis.IntCmd
-		LRange(ctx context.Context, key string, start, stop int64) *goredis.StringSliceCmd
-		Expire(ctx context.Context, key string, expiration time.Duration) *goredis.BoolCmd
-		Exists(ctx context.Context, keys ...string) *goredis.IntCmd
-		Do(ctx context.Context, args ...interface{}) *goredis.Cmd
-		Persist(ctx context.Context, key string) *goredis.BoolCmd
-	}
-
 	// CacheGeneratorFn :nodoc:
 	CacheGeneratorFn func() (interface{}, error)
 
 	// Keeper responsible for managing cache
 	Keeper interface {
-		Get(context.Context, string) (interface{}, error)
-		GetOrLock(context.Context, string) (interface{}, *redislock.Lock, error)
-		GetOrSet(context.Context, string, CacheGeneratorFn, time.Duration) (interface{}, error)
+		Get(context.Context, string) (any, error)
+		GetOrLock(context.Context, string) (any, *redislock.Lock, error)
+		GetOrSet(context.Context, string, CacheGeneratorFn, time.Duration) (any, error)
 		Store(context.Context, *redislock.Lock, Item) error
 		StoreWithoutBlocking(context.Context, Item) error
 		StoreMultiWithoutBlocking(context.Context, []Item) error
@@ -85,10 +53,11 @@ type (
 		IncreaseCachedValueByOne(ctx context.Context, key string) error
 
 		AcquireLock(context.Context, string) (*redislock.Lock, error)
+
 		SetDefaultTTL(time.Duration)
 		SetNilTTL(time.Duration)
-		SetConnectionPool(RedisConnector)
-		SetLockConnectionPool(RedisConnector)
+		SetConnectionPool(*goredis.Client)
+		SetLockConnectionPool(*goredis.Client)
 		SetLockDuration(time.Duration)
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
@@ -99,33 +68,33 @@ type (
 		//list
 		StoreRightList(context.Context, string, interface{}) error
 		StoreLeftList(context.Context, string, interface{}) error
-		GetList(context.Context, string, int64, int64) (interface{}, error)
+		GetList(context.Context, string, int64, int64) (any, error)
 		GetListLength(context.Context, string) (int64, error)
-		GetAndRemoveFirstListElement(context.Context, string) (interface{}, error)
-		GetAndRemoveLastListElement(context.Context, string) (interface{}, error)
+		GetAndRemoveFirstListElement(context.Context, string) (any, error)
+		GetAndRemoveLastListElement(context.Context, string) (any, error)
 
 		GetTTL(context.Context, string) (int64, error)
 
 		// HASH BUCKET
-		GetHashMemberOrLock(ctx context.Context, identifier string, key string) (interface{}, *redislock.Lock, error)
+		GetHashMemberOrLock(ctx context.Context, identifier string, key string) (any, *redislock.Lock, error)
 		StoreHashMember(context.Context, string, Item) error
 		StoreMultiHashMembers(ctx context.Context, mapIdentifiersToItems map[string][]Item) error
-		GetHashMember(ctx context.Context, identifier string, key string) (interface{}, error)
+		GetHashMember(ctx context.Context, identifier string, key string) (any, error)
 		DeleteHashMember(ctx context.Context, identifier string, key string) error
-		GetMultiHashMembers(ctx context.Context, hashMember []HashMember) ([]interface{}, error)
+		GetMultiHashMembers(ctx context.Context, hashMember []HashMember) ([]any, error)
 
 		// Persist
 		Persist(ctx context.Context, key string) error
 	}
 
 	keeper struct {
-		connPool       RedisConnector
+		connPool       *goredis.Client
 		nilTTL         time.Duration
 		defaultTTL     time.Duration
 		waitTime       time.Duration
 		disableCaching bool
 
-		lockConnPool RedisConnector
+		lockConnPool *goredis.Client
 		lockDuration time.Duration
 		lockTries    int
 	}
@@ -153,12 +122,12 @@ func (k *keeper) SetNilTTL(d time.Duration) {
 }
 
 // SetConnectionPool :nodoc:
-func (k *keeper) SetConnectionPool(c RedisConnector) {
+func (k *keeper) SetConnectionPool(c *goredis.Client) {
 	k.connPool = c
 }
 
 // SetLockConnectionPool :nodoc:
-func (k *keeper) SetLockConnectionPool(c RedisConnector) {
+func (k *keeper) SetLockConnectionPool(c *goredis.Client) {
 	k.lockConnPool = c
 }
 
@@ -183,7 +152,7 @@ func (k *keeper) SetDisableCaching(b bool) {
 }
 
 // Get :nodoc:
-func (k *keeper) Get(ctx context.Context, key string) (cachedItem interface{}, err error) {
+func (k *keeper) Get(ctx context.Context, key string) (cachedItem any, err error) {
 	if k.disableCaching {
 		return
 	}
@@ -197,7 +166,7 @@ func (k *keeper) Get(ctx context.Context, key string) (cachedItem interface{}, e
 }
 
 // GetOrLock :nodoc:
-func (k *keeper) GetOrLock(ctx context.Context, key string) (cachedItem interface{}, mutex *redislock.Lock, err error) {
+func (k *keeper) GetOrLock(ctx context.Context, key string) (cachedItem any, mutex *redislock.Lock, err error) {
 	if k.disableCaching {
 		return
 	}
@@ -220,7 +189,7 @@ func (k *keeper) GetOrLock(ctx context.Context, key string) (cachedItem interfac
 			Jitter: true,
 		}
 
-		if !k.isLocked(ctx, key) {
+		if !k.isLocked(ctx, mutex) {
 			cachedItem, err = k.getCachedItem(ctx, key)
 			switch {
 			// redis error, giving up
@@ -251,7 +220,7 @@ func (k *keeper) GetOrLock(ctx context.Context, key string) (cachedItem interfac
 }
 
 // GetOrSet :nodoc:
-func (k *keeper) GetOrSet(ctx context.Context, key string, fn CacheGeneratorFn, ttl time.Duration) (cachedItem interface{}, err error) {
+func (k *keeper) GetOrSet(ctx context.Context, key string, fn CacheGeneratorFn, ttl time.Duration) (cachedItem any, err error) {
 	cachedItem, mu, err := k.GetOrLock(ctx, key)
 	if err != nil {
 		return
@@ -279,7 +248,7 @@ func (k *keeper) Store(ctx context.Context, mutex *redislock.Lock, c Item) error
 		return nil
 	}
 
-	SafeUnlock(ctx, mutex)
+	defer SafeUnlock(ctx, mutex)
 
 	err := k.connPool.Set(ctx, c.GetKey(), c.GetValue(), k.decideCacheTTL(c)).Err()
 	return err
@@ -314,7 +283,11 @@ func (k *keeper) IncreaseCachedValueByOne(ctx context.Context, key string) error
 
 // AcquireLock :nodoc:
 func (k *keeper) AcquireLock(ctx context.Context, key string) (*redislock.Lock, error) {
-	lock, err := redislock.Obtain(ctx, k.lockConnPool, "lock:"+key, k.lockDuration, nil)
+	backoff := redislock.LimitRetry(redislock.LinearBackoff(100*time.Millisecond), k.lockTries)
+
+	lock, err := redislock.Obtain(ctx, k.lockConnPool, "lock:"+key, k.lockDuration, &redislock.Options{
+		RetryStrategy: backoff,
+	})
 
 	return lock, err
 }
@@ -325,12 +298,7 @@ func (k *keeper) DeleteByKeys(ctx context.Context, keys []string) error {
 		return nil
 	}
 
-	var redisKeys []string
-	for _, key := range keys {
-		redisKeys = append(redisKeys, key)
-	}
-
-	_, err := k.connPool.Del(ctx, redisKeys...).Result()
+	_, err := k.connPool.Del(ctx, keys...).Result()
 	return err
 }
 
@@ -411,7 +379,7 @@ func (k *keeper) decideCacheTTL(c Item) (ttl time.Duration) {
 	return k.defaultTTL
 }
 
-func (k *keeper) getCachedItem(ctx context.Context, key string) (value interface{}, err error) {
+func (k *keeper) getCachedItem(ctx context.Context, key string) (value any, err error) {
 	if k.disableCaching {
 		return
 	}
@@ -434,9 +402,12 @@ func (k *keeper) getCachedItem(ctx context.Context, key string) (value interface
 	return
 }
 
-func (k *keeper) isLocked(ctx context.Context, key string) bool {
-	reply, err := k.lockConnPool.Exists(ctx, "lock:"+key).Result()
-	if err != nil || reply == 0 {
+func (k *keeper) isLocked(ctx context.Context, lock *redislock.Lock) bool {
+	if lock == nil {
+		return false
+	}
+	ttl, err := lock.TTL(ctx)
+	if err != nil || ttl <= 0 {
 		return false
 	}
 
@@ -469,7 +440,7 @@ func (k *keeper) GetListLength(ctx context.Context, name string) (value int64, e
 	return k.connPool.LLen(ctx, name).Result()
 }
 
-func (k *keeper) GetAndRemoveFirstListElement(ctx context.Context, name string) (value interface{}, err error) {
+func (k *keeper) GetAndRemoveFirstListElement(ctx context.Context, name string) (value any, err error) {
 	llen, err := k.GetListLength(ctx, name)
 	if err != nil {
 		return
@@ -483,7 +454,7 @@ func (k *keeper) GetAndRemoveFirstListElement(ctx context.Context, name string) 
 	return
 }
 
-func (k *keeper) GetAndRemoveLastListElement(ctx context.Context, name string) (value interface{}, err error) {
+func (k *keeper) GetAndRemoveLastListElement(ctx context.Context, name string) (value any, err error) {
 	llen, err := k.GetListLength(ctx, name)
 	if err != nil {
 		return
@@ -497,7 +468,7 @@ func (k *keeper) GetAndRemoveLastListElement(ctx context.Context, name string) (
 	return
 }
 
-func (k *keeper) GetList(ctx context.Context, name string, size int64, page int64) (value interface{}, err error) {
+func (k *keeper) GetList(ctx context.Context, name string, size int64, page int64) (value any, err error) {
 	offset := getOffset(page, size)
 
 	llen, err := k.GetListLength(ctx, name)
@@ -584,7 +555,7 @@ func (k *keeper) StoreMultiHashMembers(ctx context.Context, mapIdentifiersToMemb
 }
 
 // GetHashMemberOrLock :nodoc:
-func (k *keeper) GetHashMemberOrLock(ctx context.Context, identifier string, key string) (cachedItem interface{}, mutex *redislock.Lock, err error) {
+func (k *keeper) GetHashMemberOrLock(ctx context.Context, identifier string, key string) (cachedItem any, mutex *redislock.Lock, err error) {
 	if k.disableCaching {
 		return
 	}
@@ -609,7 +580,7 @@ func (k *keeper) GetHashMemberOrLock(ctx context.Context, identifier string, key
 			Jitter: true,
 		}
 
-		if !k.isLocked(ctx, lockKey) {
+		if !k.isLocked(ctx, mutex) {
 			cachedItem, err = k.GetHashMember(ctx, identifier, key)
 			switch {
 			// redis error, giving up
@@ -640,7 +611,7 @@ func (k *keeper) GetHashMemberOrLock(ctx context.Context, identifier string, key
 }
 
 // GetHashMember :nodoc:
-func (k *keeper) GetHashMember(ctx context.Context, identifier string, key string) (value interface{}, err error) {
+func (k *keeper) GetHashMember(ctx context.Context, identifier string, key string) (value any, err error) {
 	if k.disableCaching {
 		return
 	}
@@ -663,7 +634,7 @@ func (k *keeper) GetHashMember(ctx context.Context, identifier string, key strin
 
 // GetMultiHashMembers return type is *goredis.StringCmd
 // to reduce looping and casting, so the caller is the one that should cast it
-func (k *keeper) GetMultiHashMembers(ctx context.Context, hashMember []HashMember) (replies []interface{}, err error) {
+func (k *keeper) GetMultiHashMembers(ctx context.Context, hashMember []HashMember) (replies []any, err error) {
 	if len(hashMember) == 0 {
 		return nil, nil
 	}

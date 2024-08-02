@@ -4,7 +4,7 @@ go 1.22.0
 
 require (
 	github.com/alicebob/miniredis v2.5.0+incompatible
-	github.com/bsm/redislock v0.9.0
+	github.com/bsm/redislock v0.9.4
 	github.com/jpillora/backoff v0.0.0-20180909062703-3050d21c67d7
 	github.com/redis/go-redis/v9 v9.6.1
 	github.com/stretchr/testify v1.8.1
