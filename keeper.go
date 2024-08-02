@@ -202,12 +202,13 @@ func (k *keeper) GetOrLock(ctx context.Context, key string) (cachedItem any, mut
 					return nil, mutex, nil
 				}
 				// can't acquire lock, let's keep waiting
+				goto Wait
 			// cache found, return it
 			default:
 				return cachedItem, nil, nil
 			}
 		}
-
+	Wait:
 		elapsed := time.Since(start)
 		if elapsed >= k.waitTime {
 			break
@@ -593,12 +594,13 @@ func (k *keeper) GetHashMemberOrLock(ctx context.Context, identifier string, key
 					return nil, mutex, nil
 				}
 				// can't acquire lock, let's keep waiting
+				goto Wait
 			// cache found, return it
 			default:
 				return cachedItem, nil, nil
 			}
 		}
-
+	Wait:
 		elapsed := time.Since(start)
 		if elapsed >= k.waitTime {
 			break
